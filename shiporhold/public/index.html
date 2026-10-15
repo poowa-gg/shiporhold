@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShipOrHold dashboard</title>
+<style>
+:root{--bg:#F5F7F9;--surface:#fff;--ink:#0E2238;--muted:#44576A;--line:#D3DCE5;--accent:#17704A;--on-accent:#fff;--ship:#17704A;--wait:#8A5A00;--hold:#B3321F;--bubble:#E8EDF2;--focus:#0B5FD8;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#0A1625;--surface:#122338;--ink:#EAF0F6;--muted:#A9B8C7;--line:#27405A;--accent:#5FD3A0;--on-accent:#06231A;--bubble:#1B3149;--focus:#7FB2FF}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.6rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+.badge{display:inline-block;font-size:.8rem;border:1px solid var(--line);border-radius:999px;padding:2px 10px;color:var(--muted);margin-left:8px;vertical-align:middle}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+form,.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px}
+form{display:grid;gap:12px;grid-template-columns:1fr 1fr;margin-bottom:24px}
+form .full{grid-column:1/-1}
+label{display:grid;gap:4px;font-weight:600;font-size:.92rem}
+input{min-height:44px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);padding:8px 12px;font:inherit}
+button{min-height:44px;border-radius:10px;border:2px solid var(--line);background:transparent;color:var(--ink);padding:0 14px;font-family:inherit;font-weight:600;font-size:.92rem;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button:disabled{opacity:.6;cursor:wait}
+.err{color:var(--hold);font-weight:600;min-height:1.3em}
+.list{display:grid;gap:14px}
+.card h3{margin:0;font-size:1.05rem}
+.meta{color:var(--muted);font-size:.9rem}
+.verdict{margin:12px 0;border-radius:12px;padding:12px 14px;color:#fff;background:var(--hold)}
+.verdict[data-tone=ship]{background:var(--ship)}.verdict[data-tone=wait]{background:var(--wait)}
+.verdict b{display:block;font-size:1.35rem;line-height:1.15}
+.msg{background:var(--bubble);border-radius:10px;padding:10px 12px;font-size:.92rem;margin-bottom:12px}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.empty{color:var(--muted);text-align:center;padding:24px}
+@media (max-width:560px){form{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<h1>ShipOrHold <span class="badge">Sandbox test mode</span></h1>
+<p class="sub">Create a PayPal invoice, then watch the Deliver or Hold answer update from live payment status. No real money moves.</p>
+
+<form id="f">
+  <label>Buyer name<input name="buyerName" required autocomplete="off"></label>
+  <label>Buyer email (PayPal sends the invoice here)<input name="buyerEmail" type="email" required autocomplete="off"></label>
+  <label class="full">What they ordered<input name="description" required placeholder="e.g. 20 handmade leather bags"></label>
+  <label>Quantity<input name="quantity" type="number" min="1" step="1" value="1" required></label>
+  <label>Price each<input name="unitPrice" type="number" min="0.01" step="0.01" required></label>
+  <label>Currency<input name="currency" value="USD" maxlength="3" required></label>
+  <div class="full"><button class="primary" id="go" type="submit">Create and send invoice</button> <span class="err" id="err" role="alert"></span></div>
+</form>
+
+<div class="list" id="list" aria-live="polite"></div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(path, opts) {
+  const r = await fetch(path, opts && { ...opts, headers: { 'Content-Type': 'application/json' } });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'Something went wrong');
+  return d;
+}
+
+function card(i) {
+  const v = i.verdict || {};
+  const link = i.payerUrl ? `<a href="${esc(i.payerUrl)}" target="_blank" rel="noopener">Open invoice page</a>` : '';
+  return `<article class="card" data-id="${esc(i.id)}">
+    <h3>${esc(i.description)}</h3>
+    <div class="meta">${esc(i.buyerName)} &middot; ${esc(i.currency)} ${esc(i.total)} &middot; status: ${esc(i.status)} &middot; paid ${esc(i.paid)} ${link ? '&middot; ' + link : ''}</div>
+    <div class="verdict" data-tone="${esc(v.tone)}"><b>${esc(v.word)}</b>${esc(v.why)}</div>
+    <div class="msg">&ldquo;${esc(v.message)}&rdquo;</div>
+    <div class="actions">
+      <button data-a="mark-paid">Record full payment</button>
+      <button data-a="mark-paid" data-half="1">Record half payment</button>
+      <button data-a="mark-refunded">Refund</button>
+      <button data-a="cancel">Cancel invoice</button>
+      <button data-a="refresh">Refresh</button>
+    </div>
+  </article>`;
+}
+
+async function load() {
+  try {
+    const items = await api('/api/invoices');
+    $('#list').innerHTML = items.length ? items.map(card).join('') : '<p class="empty">No invoices yet. Create one above.</p>';
+  } catch (e) { /* keep last view */ }
+}
+
+$('#f').addEventListener('submit', async (e) => {
+  e.preventDefault(); $('#err').textContent = ''; $('#go').disabled = true;
+  const d = Object.fromEntries(new FormData(e.target));
+  d.currency = d.currency.toUpperCase();
+  try { await api('/api/invoices', { method: 'POST', body: JSON.stringify(d) }); e.target.reset(); e.target.currency.value = 'USD'; e.target.quantity.value = 1; await load(); }
+  catch (er) { $('#err').textContent = er.message; }
+  $('#go').disabled = false;
+});
+
+$('#list').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const id = b.closest('.card').dataset.id;
+  const inv = (await api('/api/invoices')).find((x) => x.id === id);
+  const body = b.dataset.half ? { amount: (Number(inv.total) / 2).toFixed(2) } : {};
+  b.disabled = true;
+  try { await api(`/api/invoices/${encodeURIComponent(id)}/${b.dataset.a}`, { method: 'POST', body: JSON.stringify(body) }); }
+  catch (er) { alert(er.message); }
+  await load();
+});
+
+load(); setInterval(load, 4000);
+</script>
+</body>
+</html>

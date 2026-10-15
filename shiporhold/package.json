@@ -1,0 +1,13 @@
+{
+  "name": "shiporhold",
+  "version": "0.1.0",
+  "description": "Turn a chat order into a PayPal invoice and get a Deliver or Hold verdict from live payment status.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --env-file=.env server.js",
+    "test": "node --test"
+  }
+}
